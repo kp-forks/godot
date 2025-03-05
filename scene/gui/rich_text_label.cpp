@@ -1051,17 +1051,18 @@ int RichTextLabel::_draw_line(ItemFrame *p_frame, int p_line, const Vector2 &p_o
 					}
 				}
 
-				Color font_color = (step == DRAW_STEP_SHADOW || step == DRAW_STEP_OUTLINE || step == DRAW_STEP_TEXT) ? _find_color(it, p_base_color) : Color();
+				Color font_color = (step == DRAW_STEP_SHADOW_OUTLINE || step == DRAW_STEP_SHADOW || step == DRAW_STEP_OUTLINE || step == DRAW_STEP_TEXT) ? _find_color(it, p_base_color) : Color();
 				int outline_size = (step == DRAW_STEP_OUTLINE) ? _find_outline_size(it, p_outline_size) : 0;
 				Color font_outline_color = (step == DRAW_STEP_OUTLINE) ? _find_outline_color(it, p_outline_color) : Color();
 				Color font_shadow_color = p_font_shadow_color;
-				bool txt_visible = false;
-				if (step == DRAW_STEP_OUTLINE) {
-					txt_visible = (font_outline_color.a != 0 && outline_size > 0);
-				} else if (step == DRAW_STEP_SHADOW) {
-					txt_visible = (font_shadow_color.a != 0);
+				bool txt_visible = (font_color.a != 0);
+				if (step == DRAW_STEP_OUTLINE && (outline_size <= 0 || font_outline_color.a == 0)) {
+					continue;
+				} else if (step == DRAW_STEP_SHADOW_OUTLINE && (font_shadow_color.a == 0 || p_shadow_outline_size <= 0)) {
+					continue;
+				} else if (step == DRAW_STEP_SHADOW && (font_shadow_color.a == 0)) {
+					continue;
 				} else if (step == DRAW_STEP_TEXT) {
-					txt_visible = (font_color.a != 0);
 					bool has_ul = _find_underline(it);
 					if (!has_ul && underline_meta) {
 						ItemMeta *meta = nullptr;
@@ -1146,7 +1147,7 @@ int RichTextLabel::_draw_line(ItemFrame *p_frame, int p_line, const Vector2 &p_o
 						draw_line(st_start + Vector2(0, y_off), p_ofs + Vector2(off_step.x, off_step.y + y_off), st_color, underline_width);
 					}
 				}
-				if (step == DRAW_STEP_SHADOW || step == DRAW_STEP_OUTLINE || step == DRAW_STEP_TEXT) {
+				if (step == DRAW_STEP_SHADOW_OUTLINE || step == DRAW_STEP_SHADOW || step == DRAW_STEP_OUTLINE || step == DRAW_STEP_TEXT) {
 					ItemFade *fade = nullptr;
 					Item *fade_item = it;
 					while (fade_item) {
@@ -1209,7 +1210,7 @@ int RichTextLabel::_draw_line(ItemFrame *p_frame, int p_line, const Vector2 &p_o
 								charfx->range = Vector2i(l.char_offset + glyphs[i].start, l.char_offset + glyphs[i].end);
 								charfx->relative_index = l.char_offset + glyphs[i].start - item_fx->char_ofs;
 								charfx->visibility = txt_visible;
-								charfx->outline = (step == DRAW_STEP_SHADOW) || (step == DRAW_STEP_OUTLINE);
+								charfx->outline = (step == DRAW_STEP_SHADOW_OUTLINE) || (step == DRAW_STEP_SHADOW) || (step == DRAW_STEP_OUTLINE);
 								charfx->font = frid;
 								charfx->glyph_index = gl;
 								charfx->glyph_flags = gl_fl;
@@ -1224,7 +1225,6 @@ int RichTextLabel::_draw_line(ItemFrame *p_frame, int p_line, const Vector2 &p_o
 								char_xform = charfx->transform;
 								fx_offset = charfx->offset;
 								font_color = charfx->color;
-								frid = charfx->font;
 								gl = charfx->glyph_index;
 								txt_visible &= charfx->visibility;
 							}
@@ -1285,7 +1285,7 @@ int RichTextLabel::_draw_line(ItemFrame *p_frame, int p_line, const Vector2 &p_o
 						char_reverse_xform.set_origin(-char_off);
 						Transform2D char_final_xform = char_xform * char_reverse_xform;
 						draw_set_transform_matrix(char_final_xform);
-					} else if (step == DRAW_STEP_SHADOW) {
+					} else if (step == DRAW_STEP_SHADOW_OUTLINE || step == DRAW_STEP_SHADOW) {
 						font_color = font_shadow_color * Color(1, 1, 1, font_color.a);
 
 						char_reverse_xform.set_origin(-char_off - p_shadow_ofs);
@@ -1312,12 +1312,11 @@ int RichTextLabel::_draw_line(ItemFrame *p_frame, int p_line, const Vector2 &p_o
 									} else if (((glyphs[i].flags & TextServer::GRAPHEME_IS_VIRTUAL) != TextServer::GRAPHEME_IS_VIRTUAL) && ((glyphs[i].flags & TextServer::GRAPHEME_IS_EMBEDDED_OBJECT) != TextServer::GRAPHEME_IS_EMBEDDED_OBJECT)) {
 										TS->draw_hex_code_box(ci, glyphs[i].font_size, fx_offset + char_off, gl, font_color);
 									}
+								} else if (step == DRAW_STEP_SHADOW_OUTLINE && frid != RID()) {
+									TS->font_draw_glyph_outline(frid, ci, glyphs[i].font_size, p_shadow_outline_size, fx_offset + char_off + p_shadow_ofs, gl, font_color);
 								} else if (step == DRAW_STEP_SHADOW && frid != RID()) {
 									TS->font_draw_glyph(frid, ci, glyphs[i].font_size, fx_offset + char_off + p_shadow_ofs, gl, font_color);
-									if (p_shadow_outline_size > 0) {
-										TS->font_draw_glyph_outline(frid, ci, glyphs[i].font_size, p_shadow_outline_size, fx_offset + char_off + p_shadow_ofs, gl, font_color);
-									}
-								} else if (step == DRAW_STEP_OUTLINE && frid != RID() && outline_size > 0) {
+								} else if (step == DRAW_STEP_OUTLINE && frid != RID()) {
 									TS->font_draw_glyph_outline(frid, ci, glyphs[i].font_size, outline_size, fx_offset + char_off, gl, font_color);
 								}
 							}
@@ -2914,7 +2913,6 @@ bool RichTextLabel::_find_layout_subitem(Item *from, Item *to) {
 void RichTextLabel::_thread_function(void *p_userdata) {
 	set_current_thread_safe_for_nodes(true);
 	_process_line_caches();
-	updating.store(false);
 	callable_mp(this, &RichTextLabel::_thread_end).call_deferred();
 }
 
@@ -3082,7 +3080,6 @@ bool RichTextLabel::_validate_line_caches() {
 	} else {
 		updating.store(true);
 		_process_line_caches();
-		updating.store(false);
 		if (!scroll_visible) {
 			vscroll->hide();
 		}
@@ -3094,6 +3091,7 @@ bool RichTextLabel::_validate_line_caches() {
 void RichTextLabel::_process_line_caches() {
 	// Shape invalid lines.
 	if (!is_inside_tree()) {
+		updating.store(false);
 		return;
 	}
 
@@ -3116,6 +3114,7 @@ void RichTextLabel::_process_line_caches() {
 			main->first_invalid_font_line.store(i);
 
 			if (stop_thread.load()) {
+				updating.store(false);
 				return;
 			}
 		}
@@ -3132,6 +3131,7 @@ void RichTextLabel::_process_line_caches() {
 			main->first_resized_line.store(i);
 
 			if (stop_thread.load()) {
+				updating.store(false);
 				return;
 			}
 		}
@@ -3147,6 +3147,7 @@ void RichTextLabel::_process_line_caches() {
 		main->first_invalid_font_line.store(i);
 
 		if (stop_thread.load()) {
+			updating.store(false);
 			return;
 		}
 		loaded.store(double(i) / double(main->lines.size()));
@@ -3155,6 +3156,7 @@ void RichTextLabel::_process_line_caches() {
 	main->first_invalid_line.store(main->lines.size());
 	main->first_resized_line.store(main->lines.size());
 	main->first_invalid_font_line.store(main->lines.size());
+	updating.store(false);
 
 	if (fit_content) {
 		update_minimum_size();
@@ -3394,6 +3396,13 @@ void RichTextLabel::update_image(const Variant &p_key, BitField<ImageUpdateMask>
 				ItemImage *item = it_img;
 				if (p_mask & UPDATE_REGION) {
 					item->region = p_region;
+					if (!(p_mask & UPDATE_TEXTURE)) {
+						// Update existing atlas texture region, if texture is not updated.
+						Ref<AtlasTexture> atlas_tex = item->image;
+						if (atlas_tex.is_valid()) {
+							atlas_tex->set_region(item->region);
+						}
+					}
 				}
 				if (p_mask & UPDATE_TEXTURE) {
 					if (item->image.is_valid()) {
@@ -6825,6 +6834,7 @@ Size2 RichTextLabel::get_minimum_size() const {
 void RichTextLabel::_generate_context_menu() {
 	menu = memnew(PopupMenu);
 	add_child(menu, false, INTERNAL_MODE_FRONT);
+	menu->force_parent_owned();
 	menu->connect(SceneStringName(id_pressed), callable_mp(this, &RichTextLabel::menu_option));
 
 	menu->add_item(ETR("Copy"), MENU_COPY);
